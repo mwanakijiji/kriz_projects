@@ -21,6 +21,8 @@ variance_target_input = input("Enter decimal variance desired: ")
 # read in the time-series photometry
 time_series = pd.read_csv("notebooks_for_development/test_time_series_20210917.csv", index_col=0)
 
+# define time
+abcissa_time = time_series["jd-2459431"]
 
 def num_comps_var(variance_expl,variance_target,round="up"):
     '''
@@ -76,7 +78,6 @@ x = time_series.loc[:, list_brightest].values
 # column number to inject fake transit into
 col_fake_transit = 10
 
-abcissa_time = time_series["jd-2459431"]
 # generate transit model
 tm = QuadraticModel()
 tm.set_data(abcissa_time)
@@ -90,6 +91,8 @@ transit_fyi_visual = np.multiply(0.5*np.median(x[:,col_fake_transit]),model_tran
 
 # replace real photometry with fake
 x[:,col_fake_transit] = noisy_transit
+
+print("INJECTED A FAKE TRANSIT!")
 '''
 
 ## END OPTION TO INJECT FAKE TRANSIT
@@ -151,15 +154,43 @@ photometry_detrend_white = np.subtract(x_scaled,x_scaled_lower)
 # note the same functionality is available in .inverse_transform(), but the below
 # is clearer to me
 
-# test to see we get same as original
+# full reconstruction to see we get same as original
 x_recon_exact = np.add(np.multiply(x_scaled,scaler.scale_),scaler.mean_)
-# from lower-dim basis set, but without having done de-trending
+# reconstruction from lower-dim basis set, but without having done de-trending
 x_recon_lower = np.add(np.multiply(x_scaled_lower,scaler.scale_),scaler.mean_)
-# with detrending
+# reconstruction from lower-dim basis set, with detrending
 x_recon_detrend = np.add(np.multiply(photometry_detrend_white,scaler.scale_),scaler.mean_)
+
+# write detrended photometry to file
+csv_file_name = "junk.csv"
+x_recon_detrend_df = pd.DataFrame(x_recon_detrend)
+x_recon_detrend_df.to_csv(csv_file_name)
+print("Wrote photometry out to " + csv_file_name)
 
 ## fyi plots
 
+
+# plot all the photometries before and after detrending
+'''
+f, (ax1, ax2) = plt.subplots(1, 2, sharey=True)
+
+for i in range(0,np.shape(x)[1]):
+    ax1.plot(abcissa_time,x[:,i])
+ax1.set_title("photometry, pre-detrending")
+ax1.set_xlabel("JD-2459431")
+ax1.set_ylabel("Aperture counts")
+
+for i in range(0,np.shape(x_recon_detrend)[1]):
+    ax2.plot(abcissa_time,x_recon_detrend[:,i])
+ax2.set_title("photometry, post-detrending")
+ax2.set_xlabel("JD-2459431")
+
+plt.show()
+'''
+
+
+'''
+# comparison of one star's photometry, before and after
 # choose one detrended star
 col_to_use = 27
 x_recon_detrend_one = x_recon_detrend[:,col_to_use]
@@ -170,3 +201,4 @@ plt.plot(x_recon_lower[:,col_to_use], label="reverse-whitened, lower basis set")
 plt.plot(x_recon_detrend[:,col_to_use], label="w detrending")
 plt.legend()
 plt.show()
+'''
