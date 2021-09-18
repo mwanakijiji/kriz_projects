@@ -1,86 +1,38 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# This reads in time-series photometry and does a PCA reduction of the brightest stars
+# This decorrelates empirical photometry by making a PCA basis set from a
+# number of different time-series photometries, then projects them onto
+# a lower-dimensional basis set. There is also an option for injecting a
+# fake exoplanet transit to test retrieval.
+
+# Created 2021 Sept. 18 by E.S.
 
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from pytransit import QuadraticModel
-
-time_series = pd.read_csv("test_time_series_20210917.csv", index_col=0)
+from scipy import linalg
 
 
-# option to inject a transit
-__ in corporate real JD time below; use time_series["jd"]__
-length_dataset = len(time_series)
-# time; don't know what form this will take
-abcissa_time = np.linspace(0,1.2,length_dataset)
-# generate transit model
-tm = QuadraticModel()
-#tm.set_data(times)
-tm.set_data(abcissa_time)
-# note t0 is time-of-center
-# (k=0.1 gives transit depth of approx 1%)
-model_transit = tm.evaluate(k=0.1, ldc=[0.2, 0.1], t0=0.6, p=0.7, a=3.0, i=0.5*np.pi)
-noisy_transit = np.multiply(time_series["121"],model_transit)
-transit_visual = np.multiply(0.5*np.median(time_series["121"]),model_transit)
+# prompt user for desired variance
+variance_target_input = input("Enter decimal variance desired: ")
 
-import ipdb; ipdb.set_trace()
-
-plt.plot(abcissa_time,time_series["121"],label="original")
-plt.plot(abcissa_time,noisy_transit,label="transit")
-plt.plot(abcissa_time,transit_visual, linestyle="--", color="k")
-plt.legend()
-plt.show()
-import ipdb; ipdb.set_trace()
-
-# PCA function partly cribbed from https://towardsdatascience.com/pca-and-svd-explained-with-numpy-5d13b0d2a4d8
-def pca(X):
-    # X: data matrix, assumes 0-centered
-    # N: number of PCA basis vectors to project data onto
-    n, m = X.shape
-    assert np.allclose(X.mean(axis=0), np.zeros(m))
-    # Compute covariance matrix
-    C = np.dot(X.T, X) / (n-1)
-    # Eigen decomposition
-    eigen_vals, eigen_vecs = np.linalg.eig(C)
-    print(eigen_vals.shape)
-    # Project X onto PC space; these are the eigenvectors of the data
-    X_pca = np.dot(X, eigen_vecs)
-
-    ## BEGIN TEST
-    print(eigen_vecs.shape)
-    print(eigen_vecs)
-    X_proj = np.dot(X[:,0],eigen_vecs)
-    plt.plot(X_proj)
-    plt.show()
-    ## END TEST
-
-    # determine cumulative explained variance
-    variance_explained = []
-    for i in eigen_vals:
-        variance_explained.append((i/sum(eigen_vals)))
-
-    cumulative_variance_explained = np.cumsum(variance_explained)
-
-    # return orthonormal basis set, an array of cumulative variance, and eigenvalues of correlation matrix
-    return X_pca, cumulative_variance_explained, eigen_vals
+# read in the time-series photometry
+time_series = pd.read_csv("notebooks_for_development/test_time_series_20210917.csv", index_col=0)
 
 
-# project the time-series of bright stars onto eigenvectors, and return the projection and the explained variance
-x_pca, variance_expl, e_vals = pca(x_scaled)
+def num_comps_var(variance_expl,variance_target,round="up"):
+    '''
+    Returns the number of PCA components that explain X amount of variance
 
+    INPUTS:
+    variance_expl: the cumulative explained variance
+    variance_target: the variance we want to account for (decimal)
 
-# project one star onto basis set
-
-
-# return number of components that explain X amount of variance
-# (note number can be a decimal)
-
-def num_comps_var(variance_expl,variance_target):
+    OUTPUTS:
+    comps_interp_int: integer of the number of modes
+    '''
 
     # abcissa (number of components); start with 1
     abcissa = np.add(1.,np.arange(len(variance_expl)))
@@ -88,75 +40,133 @@ def num_comps_var(variance_expl,variance_target):
     # interpolate (note a flipping of axes is necessary)
     comps_interp = np.interp(x=variance_target,xp=variance_expl,fp=abcissa)
 
-    return comps_interp
+    # round (up by default)
+    if round=="up":
+        comps_interp_int = int(np.ceil(comps_interp))
+    elif round=="down":
+        comps_interp_int = int(np.floor(comps_interp))
+
+    return comps_interp_int
 
 
-# make list of brightest stars, with option to plot photometry,
-# with annotations to identify stars
-
+# make list of brightest stars (and exclude columns with other data)
 list_brightest = [] # initialize list of brightest stars
 for (columnName, columnData) in time_series.iteritems():
-    #print('Column Name : ', columnName)
-    if np.median(columnData.values) > 5000:
-        plt.plot(columnData.values)
-        plt.annotate(str(columnName), xy=(2300,np.median(columnData.values)), xycoords="data")
-        list_brightest.append(str(columnName))
-'''
-plt.xlabel("Frame number (~5 hr observation duration)")
-plt.ylabel("Direct counts (no sky subtraction)")
-plt.show()
-'''
+    #print(type(columnData[0]))
+    if (columnName != "fit_file_name" and columnName != "jd-2459431" and columnName != "jd_helio-2459431"):
+        if (np.median(columnData.values) > 5000):
+            #plt.plot(columnData.values)
+            #plt.annotate(str(columnName), xy=(2300,np.median(columnData.values)), xycoords="data")
+            list_brightest.append(str(columnName))
 
 
 # option to remove any stars that may be intrinsically variable
-
 #list_brightest.remove("25")
 #list_brightest.remove("271")
 
-
-# select the bright stars we want, and whiten the data
-'''
-# separate out the photometry from the brightest stars
+# select the bright stars we want
+# (note that this data subset is not a DataFrame, and
+# we access columns by location, not star name)
 x = time_series.loc[:, list_brightest].values
 
-# standardize the photometry
-x_scaled = StandardScaler().fit_transform(x)
 
-
-# project the time-series of bright stars onto eigenvectors, and return the projection and the explained variance
-
-x_pca, variance_expl = pca(x_scaled)
-
-
-# subtract these first components from the data
-
-photometry_decorr = np.subtract(x_scaled[:,0],np.dot(x_pca[:,:10],x_scaled[:,0]))
-'''
-
-# np.dot(x_scaled[:,0],x_pca[:,:10].T)
-
-
-# plot explained variance
+## BEGIN OPTION TO INJECT FAKE TRANSIT
 
 '''
-plt.plot(variance_expl)
+# column number to inject fake transit into
+col_fake_transit = 10
+
+abcissa_time = time_series["jd-2459431"]
+# generate transit model
+tm = QuadraticModel()
+tm.set_data(abcissa_time)
+# note t0 is time-of-center
+# (k=0.1 gives transit depth of approx 1%)
+model_transit = tm.evaluate(k=0.1, ldc=[0.2, 0.1], t0=0.6, p=0.7, a=3.0, i=0.5*np.pi)
+noisy_transit = np.multiply(x[:,col_fake_transit],model_transit)
+
+# a scaling of the model to guide the eye on plot
+transit_fyi_visual = np.multiply(0.5*np.median(x[:,col_fake_transit]),model_transit)
+
+# replace real photometry with fake
+x[:,col_fake_transit] = noisy_transit
+'''
+
+## END OPTION TO INJECT FAKE TRANSIT
+
+
+# plot to show transits
+
+'''
+plt.plot(abcissa_time,time_series["121"],label="original")
+plt.plot(abcissa_time,noisy_transit,label="transit")
+plt.plot(abcissa_time,transit_visual, linestyle="--", color="k")
+plt.legend()
 plt.show()
 '''
 
-'''
-# plot eigenvectors
+# standardize the photometry (i.e., whiten the data)
+scaler = StandardScaler() # this conveniently let us retrieve attributes (mean, offset) for reconstruction
+x_scaled = scaler.fit_transform(x) # whiten
 
-for i in range(0,len(x_pca[0,:])):
-    plt.plot(x_pca[:,i])
+
+# decompose with SVD
+U, s, Vh = linalg.svd(x_scaled)
+
+
+# s is just a list of singular values; make the full sigma matrix
+sigma = np.zeros((U.shape[0], Vh.shape[0]))
+for i in range(min(U.shape[0], Vh.shape[0])):
+    sigma[i, i] = s[i]
+
+
+# determine cumulative explained variance
+# (note the diagonal values in the sigma matrix are the
+# 'singular values', or the square roots of the eigenvalues
+# of x_scaled.T*x_scaled; they are squared to show the contribution
+# of that mode to the variance)
+variance_explained = []
+eigen_vals = np.power(s,2.)
+for i in eigen_vals:
+    variance_explained.append((i/sum(eigen_vals)))
+cumulative_variance_explained = np.cumsum(variance_explained)
+
+
+N_comps = num_comps_var(variance_expl=cumulative_variance_explained,variance_target=variance_target_input)
+
+print("Number of components to use for reconstruction:")
+print(N_comps)
+
+# reconstruct original matrix ON LOWER DIMS
+x_scaled_lower = np.dot(U, np.dot(sigma[:,:N_comps], Vh[:N_comps,:]))
+
+# de-trend the photometry of ALL the stars by subtracting the lower-dim reconstruction
+# (note this photometry has not been reverse-whitened yet)
+photometry_detrend_white = np.subtract(x_scaled,x_scaled_lower)
+
+# make full PCA-reconstruction, based on lower-dimensional basis set,
+# by reverse-whitening (up until now we have only PCA-reconstructed
+# the whitened data)
+
+# note the same functionality is available in .inverse_transform(), but the below
+# is clearer to me
+
+# test to see we get same as original
+x_recon_exact = np.add(np.multiply(x_scaled,scaler.scale_),scaler.mean_)
+# from lower-dim basis set, but without having done de-trending
+x_recon_lower = np.add(np.multiply(x_scaled_lower,scaler.scale_),scaler.mean_)
+# with detrending
+x_recon_detrend = np.add(np.multiply(photometry_detrend_white,scaler.scale_),scaler.mean_)
+
+## fyi plots
+
+# choose one detrended star
+col_to_use = 27
+x_recon_detrend_one = x_recon_detrend[:,col_to_use]
+plt.title('fyi plot of photometry of one star')
+plt.plot(x[:,col_to_use], label="original")
+plt.plot(np.subtract(x_recon_exact[:,col_to_use],500), label="reverse-whitened, exact (w offset)")
+plt.plot(x_recon_lower[:,col_to_use], label="reverse-whitened, lower basis set")
+plt.plot(x_recon_detrend[:,col_to_use], label="w detrending")
+plt.legend()
 plt.show()
-
-
-plt.plot(single_star_data, label="empirical, post-scaling")
-plt.show()
-
-plt.plot(recon_light_curve,label="reconstructed")
-plt.show()
-
-plt.plot(photometry_decorr)
-plt.show()
-'''
