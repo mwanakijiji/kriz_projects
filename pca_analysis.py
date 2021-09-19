@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler
 from scipy import linalg
+from pytransit import QuadraticModel
 
 
 # prompt user for desired variance
@@ -74,39 +75,46 @@ x = time_series.loc[:, list_brightest].values
 
 ## BEGIN OPTION TO INJECT FAKE TRANSIT
 
-'''
 # column number to inject fake transit into
-col_fake_transit = 10
+col_fake_transit = 1
 
 # generate transit model
 tm = QuadraticModel()
 tm.set_data(abcissa_time)
 # note t0 is time-of-center
 # (k=0.1 gives transit depth of approx 1%)
-model_transit = tm.evaluate(k=0.1, ldc=[0.2, 0.1], t0=0.6, p=0.7, a=3.0, i=0.5*np.pi)
+
+# model where transit is between ~0.75 and 0.79 JD
+#model_transit = tm.evaluate(k=0.1, ldc=[0.2, 0.1], t0=0.7, p=0.7, a=3.0, i=0.5*np.pi)
+
+# model where transit is between ~0.75 and 0.79 JD
+model_transit = tm.evaluate(k=0.1, ldc=[0.2, 0.1], t0=0.77, p=0.3, a=3.0, i=0.5*np.pi)
+
 noisy_transit = np.multiply(x[:,col_fake_transit],model_transit)
 
 # a scaling of the model to guide the eye on plot
-transit_fyi_visual = np.multiply(0.5*np.median(x[:,col_fake_transit]),model_transit)
+#transit_fyi_visual = np.multiply(0.5*np.median(x[:,col_fake_transit]),model_transit)
+
+f, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+ax1.plot(abcissa_time,x[:,col_fake_transit],label="original photometry (underplotted)")
+ax1.plot(abcissa_time,noisy_transit,label="w/ injected transit")
+ax1.set_ylabel("Photometry (counts)")
+ax1.legend()
+ax2.plot(abcissa_time,model_transit, linestyle="--", color="k")
+ax2.set_xlabel("JD-2459431")
+ax2.set_ylabel("Transit depth")
+plt.tight_layout()
+plt.show()
+#import ipdb; ipdb.set_trace()
 
 # replace real photometry with fake
 x[:,col_fake_transit] = noisy_transit
 
 print("INJECTED A FAKE TRANSIT!")
-'''
+
 
 ## END OPTION TO INJECT FAKE TRANSIT
 
-
-# plot to show transits
-
-'''
-plt.plot(abcissa_time,time_series["121"],label="original")
-plt.plot(abcissa_time,noisy_transit,label="transit")
-plt.plot(abcissa_time,transit_visual, linestyle="--", color="k")
-plt.legend()
-plt.show()
-'''
 
 # standardize the photometry (i.e., whiten the data)
 scaler = StandardScaler() # this conveniently let us retrieve attributes (mean, offset) for reconstruction
